@@ -15,9 +15,46 @@ fi
 
 # Check Python version
 PYTHON_VERSION=$(python3 -c "import sys; print(sys.version_info.major)")
+PYTHON_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
 if [ "$PYTHON_VERSION" -lt 3 ]; then
     echo "Python version 3 or higher is required. Found version $PYTHON_VERSION."
     exit 1
+fi
+
+# Check if we're on a Debian/Ubuntu system
+IS_DEBIAN_UBUNTU=0
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    if [[ "$ID" == "debian" || "$ID" == "ubuntu" || "$ID_LIKE" == *"debian"* ]]; then
+        IS_DEBIAN_UBUNTU=1
+    fi
+fi
+
+# Check if python3-venv is installed (for Debian/Ubuntu)
+VENV_PACKAGE_INSTALLED=1
+if [ $IS_DEBIAN_UBUNTU -eq 1 ]; then
+    if ! dpkg -l | grep -q "python$PYTHON_VERSION\.$PYTHON_MINOR-venv\|python$PYTHON_VERSION-venv\|python3-venv"; then
+        VENV_PACKAGE_INSTALLED=0
+        echo "The python3-venv package is required but not installed."
+        echo "To install it, run: sudo apt install python${PYTHON_VERSION}.${PYTHON_MINOR}-venv"
+        echo "If that's not available, try: sudo apt install python${PYTHON_VERSION}-venv"
+        echo "Or: sudo apt install python3-venv"
+        
+        read -p "Would you like to install python3-venv automatically? (y/n): " INSTALL_VENV
+        if [[ "$INSTALL_VENV" =~ ^[Yy]$ ]]; then
+            echo "Installing python3-venv package..."
+            if sudo apt update && sudo apt install -y python${PYTHON_VERSION}.${PYTHON_MINOR}-venv || sudo apt install -y python${PYTHON_VERSION}-venv || sudo apt install -y python3-venv; then
+                echo "Successfully installed python3-venv"
+                VENV_PACKAGE_INSTALLED=1
+            else
+                echo "Failed to install python3-venv. Please install it manually and run this script again."
+                exit 1
+            fi
+        else
+            echo "Please install python3-venv manually and run this script again."
+            exit 1
+        fi
+    fi
 fi
 
 # Check if Docker is installed (optional)
@@ -34,6 +71,12 @@ fi
 if [ ! -d "venv" ]; then
     echo "Creating virtual environment..."
     python3 -m venv venv
+    if [ $? -ne 0 ]; then
+        echo "Failed to create virtual environment."
+        echo "If you're on Ubuntu/Debian, please ensure python3-venv is installed."
+        echo "You can install it using: sudo apt install python${PYTHON_VERSION}.${PYTHON_MINOR}-venv"
+        exit 1
+    fi
 fi
 
 # Activate the virtual environment and install dependencies
