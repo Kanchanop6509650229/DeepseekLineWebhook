@@ -42,27 +42,34 @@ if [ -f /etc/os-release ]; then
 fi
 
 # Check if python3-venv is installed (for Debian/Ubuntu)
-VENV_PACKAGE_INSTALLED=1
+VENV_PACKAGE_INSTALLED=0
 if [ $IS_DEBIAN_UBUNTU -eq 1 ]; then
-    if ! dpkg -l | grep -q "python$PYTHON_VERSION\.$PYTHON_MINOR-venv\|python$PYTHON_VERSION-venv\|python3-venv"; then
-        VENV_PACKAGE_INSTALLED=0
+    # Fix: Use a better pattern for checking if venv packages are installed
+    if dpkg -l | grep -q "python${PYTHON_VERSION}\.${PYTHON_MINOR}-venv\|python${PYTHON_VERSION}-venv\|python3-venv"; then
+        VENV_PACKAGE_INSTALLED=1
+        echo "Python virtual environment packages are already installed."
+    else
         echo "The python3-venv package is required but not installed."
-        echo "To install it, run: sudo apt install python${PYTHON_VERSION}.${PYTHON_MINOR}-venv"
-        echo "If that's not available, try: sudo apt install python${PYTHON_VERSION}-venv"
-        echo "Or: sudo apt install python3-venv"
+        echo "To install it, you can use one of these commands:"
+        echo "  sudo apt install python${PYTHON_VERSION}.${PYTHON_MINOR}-venv"
+        echo "  sudo apt install python${PYTHON_VERSION}-venv"
+        echo "  sudo apt install python3-venv"
         
         read -p "Would you like to install python3-venv automatically? (y/n): " INSTALL_VENV
         if [[ "$INSTALL_VENV" =~ ^[Yy]$ ]]; then
-            echo "Installing python3-venv package..."
-            if sudo apt update && sudo apt install -y python${PYTHON_VERSION}.${PYTHON_MINOR}-venv || sudo apt install -y python${PYTHON_VERSION}-venv || sudo apt install -y python3-venv; then
-                echo "Successfully installed python3-venv"
+            echo "Installing Python virtual environment packages..."
+            # Try multiple packages in order of specificity
+            if sudo apt update && (sudo apt install -y python${PYTHON_VERSION}.${PYTHON_MINOR}-venv || 
+                                   sudo apt install -y python${PYTHON_VERSION}-venv || 
+                                   sudo apt install -y python3-venv); then
+                echo "Successfully installed virtual environment packages"
                 VENV_PACKAGE_INSTALLED=1
             else
-                echo "Failed to install python3-venv. Please install it manually and run this script again."
+                echo "Failed to install virtual environment packages. Please install manually and run this script again."
                 exit 1
             fi
         else
-            echo "Please install python3-venv manually and run this script again."
+            echo "Please install the required packages manually and run this script again."
             exit 1
         fi
     fi
@@ -78,37 +85,148 @@ else
     echo "Continuing with local installation..."
 fi
 
+# Remove existing venv if it's incomplete
+if [ -d "venv" ] && [ ! -f "venv/bin/activate" ]; then
+    echo "Found incomplete virtual environment. Removing it to recreate..."
+    rm -rf venv
+fi
+
 # Create a virtual environment if it doesn't exist
 if [ ! -d "venv" ]; then
     echo "Creating virtual environment..."
-    python3 -m venv venv
+    # Use the --prompt option to ensure it creates a more complete environment
+    python3 -m venv venv --prompt "jaidee-env"
     if [ $? -ne 0 ]; then
         echo "Failed to create virtual environment."
-        echo "If you're on Ubuntu/Debian, please ensure python3-venv is installed."
-        echo "You can install it using: sudo apt install python${PYTHON_VERSION}.${PYTHON_MINOR}-venv"
+        
+        # Additional helpful information for troubleshooting
+        echo "Checking Python venv capabilities..."
+        python3 -m venv --help
+        
+        if [ $IS_DEBIAN_UBUNTU -eq 1 ]; then
+            echo "On Ubuntu/Debian, try installing these packages:"
+            echo "sudo apt install python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev"
+            
+            # Additional suggestions for Ubuntu 24.04+
+            if [[ "$VERSION_ID" == "24.04" || $(echo $VERSION_ID | cut -d. -f1) -ge 24 ]]; then
+                echo "For Ubuntu 24.04 or later, you might also need:"
+                echo "sudo apt install python${PYTHON_VERSION}-distutils"
+            fi
+        fi
+        
         exit 1
     fi
 fi
 
-# Explicitly check if the activation script exists
+# Double-check that the activate script exists
 if [ ! -f "venv/bin/activate" ]; then
     echo "Virtual environment was created, but activation script wasn't found."
     echo "This might indicate an issue with your Python installation or permissions."
-    echo "Try recreating the virtual environment manually:"
-    echo "    rm -rf venv"
-    echo "    python3 -m venv venv"
     
-    # Additional diagnostics
-    echo "Checking virtual environment structure:"
-    ls -la venv/
-    if [ -d "venv/bin" ]; then
-        echo "Contents of venv/bin:"
-        ls -la venv/bin/
-    else
-        echo "venv/bin directory doesn't exist!"
+    # Try to fix it by installing the ensurepip module
+    echo "Attempting to fix the environment by installing ensurepip..."
+    python3 -m ensurepip
+    
+    # Try recreating the environment with additional options
+    echo "Recreating the virtual environment with additional options..."
+    rm -rf venv
+    python3 -m venv venv --system-site-packages --prompt "jaidee-env"
+    
+    # Check again
+    if [ ! -f "venv/bin/activate" ]; then
+        echo "Still couldn't create a complete virtual environment."
+        echo "Environment contents:"
+        ls -la venv/
+        if [ -d "venv/bin" ]; then
+            echo "Contents of venv/bin:"
+            ls -la venv/bin/
+        else
+            echo "venv/bin directory doesn't exist!"
+        fi
+        
+        # Last resort: create the activate script manually
+        echo "Creating minimal activate script manually..."
+        mkdir -p venv/bin
+        cat > venv/bin/activate << 'EOF'
+# This file must be used with "source bin/activate" *from bash*
+# you cannot run it directly
+
+deactivate () {
+    unset -f pydoc >/dev/null 2>&1 || true
+    
+    # reset old environment variables
+    # ! [ -z ${VAR+_} ] returns true if VAR is declared at all
+    if ! [ -z "${_OLD_VIRTUAL_PATH:+_}" ] ; then
+        PATH="$_OLD_VIRTUAL_PATH"
+        export PATH
+        unset _OLD_VIRTUAL_PATH
     fi
     
-    exit 1
+    if ! [ -z "${_OLD_VIRTUAL_PYTHONHOME+_}" ] ; then
+        PYTHONHOME="$_OLD_VIRTUAL_PYTHONHOME"
+        export PYTHONHOME
+        unset _OLD_VIRTUAL_PYTHONHOME
+    fi
+    
+    # The hash command must be called to get it to forget past
+    # commands. Without forgetting past commands the $PATH changes
+    # we made may not be respected
+    hash -r 2>/dev/null
+    
+    if ! [ -z "${_OLD_VIRTUAL_PS1+_}" ] ; then
+        PS1="$_OLD_VIRTUAL_PS1"
+        export PS1
+        unset _OLD_VIRTUAL_PS1
+    fi
+    
+    unset VIRTUAL_ENV
+    unset -f deactivate
+}
+
+# unset irrelevant variables
+deactivate nondestructive
+
+VIRTUAL_ENV="$(cd "$(dirname "$(dirname "${BASH_SOURCE[0]}")")" && pwd)"
+export VIRTUAL_ENV
+
+_OLD_VIRTUAL_PATH="$PATH"
+PATH="$VIRTUAL_ENV/bin:$PATH"
+export PATH
+
+# unset PYTHONHOME if set
+if ! [ -z "${PYTHONHOME+_}" ] ; then
+    _OLD_VIRTUAL_PYTHONHOME="$PYTHONHOME"
+    unset PYTHONHOME
+fi
+
+if [ -z "${VIRTUAL_ENV_DISABLE_PROMPT-}" ] ; then
+    _OLD_VIRTUAL_PS1="${PS1-}"
+    PS1="(jaidee-env) ${PS1-}"
+    export PS1
+fi
+
+# Make sure to unalias pydoc if it's already there
+alias pydoc 2>/dev/null >/dev/null && unalias pydoc || true
+
+pydoc () {
+    python -m pydoc "$@"
+}
+
+# The hash command must be called to get it to forget past
+# commands. Without forgetting past commands the $PATH changes
+# we made may not be respected
+hash -r 2>/dev/null
+EOF
+        chmod +x venv/bin/activate
+        
+        # Check one final time
+        if [ ! -f "venv/bin/activate" ]; then
+            echo "Manual creation also failed. Please install virtualenv and try again:"
+            echo "pip3 install virtualenv"
+            echo "Then run: virtualenv venv"
+            exit 1
+        fi
+    fi
 fi
 
 # Activate the virtual environment and install dependencies
