@@ -6,6 +6,14 @@ echo "ใจดี Chatbot - Installation Script"
 echo "========================================"
 echo ""
 
+# Enable debug mode if needed
+DEBUG=0
+if [[ "$1" == "--debug" ]]; then
+    DEBUG=1
+    set -x  # Enable command tracing
+    echo "Debug mode enabled"
+fi
+
 # Check if Python is installed
 if ! command -v python3 &> /dev/null; then
     echo "Python is not installed or not in PATH."
@@ -21,12 +29,15 @@ if [ "$PYTHON_VERSION" -lt 3 ]; then
     exit 1
 fi
 
+echo "Using Python version $PYTHON_VERSION.$PYTHON_MINOR"
+
 # Check if we're on a Debian/Ubuntu system
 IS_DEBIAN_UBUNTU=0
 if [ -f /etc/os-release ]; then
     . /etc/os-release
     if [[ "$ID" == "debian" || "$ID" == "ubuntu" || "$ID_LIKE" == *"debian"* ]]; then
         IS_DEBIAN_UBUNTU=1
+        echo "Detected Debian/Ubuntu-based system: $PRETTY_NAME"
     fi
 fi
 
@@ -79,9 +90,40 @@ if [ ! -d "venv" ]; then
     fi
 fi
 
+# Explicitly check if the activation script exists
+if [ ! -f "venv/bin/activate" ]; then
+    echo "Virtual environment was created, but activation script wasn't found."
+    echo "This might indicate an issue with your Python installation or permissions."
+    echo "Try recreating the virtual environment manually:"
+    echo "    rm -rf venv"
+    echo "    python3 -m venv venv"
+    
+    # Additional diagnostics
+    echo "Checking virtual environment structure:"
+    ls -la venv/
+    if [ -d "venv/bin" ]; then
+        echo "Contents of venv/bin:"
+        ls -la venv/bin/
+    else
+        echo "venv/bin directory doesn't exist!"
+    fi
+    
+    exit 1
+fi
+
 # Activate the virtual environment and install dependencies
 echo "Activating virtual environment and installing dependencies..."
 source venv/bin/activate
+if [ $? -ne 0 ]; then
+    echo "Failed to activate virtual environment."
+    exit 1
+fi
+
+# Verify activation
+if [[ -z "$VIRTUAL_ENV" ]]; then
+    echo "Virtual environment activation didn't work as expected."
+    exit 1
+fi
 
 echo "Installing required packages..."
 pip install -r requirements.txt
