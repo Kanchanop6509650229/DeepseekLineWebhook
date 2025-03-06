@@ -41,35 +41,86 @@ if [ -f /etc/os-release ]; then
     fi
 fi
 
-# Check if python3-venv is installed (for Debian/Ubuntu)
-VENV_PACKAGE_INSTALLED=0
+# Check for required packages on Debian/Ubuntu
 if [ $IS_DEBIAN_UBUNTU -eq 1 ]; then
-    # Fix: Use a better pattern for checking if venv packages are installed
+    # Check for python3-venv
+    VENV_PACKAGE_INSTALLED=0
     if dpkg -l | grep -q "python${PYTHON_VERSION}\.${PYTHON_MINOR}-venv\|python${PYTHON_VERSION}-venv\|python3-venv"; then
         VENV_PACKAGE_INSTALLED=1
         echo "Python virtual environment packages are already installed."
     else
         echo "The python3-venv package is required but not installed."
-        echo "To install it, you can use one of these commands:"
-        echo "  sudo apt install python${PYTHON_VERSION}.${PYTHON_MINOR}-venv"
-        echo "  sudo apt install python${PYTHON_VERSION}-venv"
-        echo "  sudo apt install python3-venv"
+    fi
+    
+    # Check for python3-dev (needed for compiling extensions)
+    DEV_PACKAGE_INSTALLED=0
+    if dpkg -l | grep -q "python${PYTHON_VERSION}\.${PYTHON_MINOR}-dev\|python${PYTHON_VERSION}-dev\|python3-dev"; then
+        DEV_PACKAGE_INSTALLED=1
+        echo "Python development packages are already installed."
+    else
+        echo "Python development packages are required but not installed."
+    fi
+    
+    # If either package is missing, offer to install
+    if [ $VENV_PACKAGE_INSTALLED -eq 0 ] || [ $DEV_PACKAGE_INSTALLED -eq 0 ]; then
+        echo ""
+        echo "Missing required packages:"
+        [ $VENV_PACKAGE_INSTALLED -eq 0 ] && echo "- python3-venv (for virtual environments)"
+        [ $DEV_PACKAGE_INSTALLED -eq 0 ] && echo "- python3-dev (for compiling extensions)"
+        echo ""
         
-        read -p "Would you like to install python3-venv automatically? (y/n): " INSTALL_VENV
-        if [[ "$INSTALL_VENV" =~ ^[Yy]$ ]]; then
-            echo "Installing Python virtual environment packages..."
-            # Try multiple packages in order of specificity
-            if sudo apt update && (sudo apt install -y python${PYTHON_VERSION}.${PYTHON_MINOR}-venv || 
-                                   sudo apt install -y python${PYTHON_VERSION}-venv || 
-                                   sudo apt install -y python3-venv); then
-                echo "Successfully installed virtual environment packages"
+        read -p "Would you like to install these packages automatically? (y/n): " INSTALL_PACKAGES
+        if [[ "$INSTALL_PACKAGES" =~ ^[Yy]$ ]]; then
+            echo "Installing required Python packages..."
+            
+            # Build an array of packages to install
+            PACKAGES_TO_INSTALL=()
+            
+            if [ $VENV_PACKAGE_INSTALLED -eq 0 ]; then
+                # Try specific version first, then fall back to generic
+                if apt-cache search --names-only "python${PYTHON_VERSION}.${PYTHON_MINOR}-venv" | grep -q .; then
+                    PACKAGES_TO_INSTALL+=("python${PYTHON_VERSION}.${PYTHON_MINOR}-venv")
+                elif apt-cache search --names-only "python${PYTHON_VERSION}-venv" | grep -q .; then
+                    PACKAGES_TO_INSTALL+=("python${PYTHON_VERSION}-venv")
+                else
+                    PACKAGES_TO_INSTALL+=("python3-venv")
+                fi
+            fi
+            
+            if [ $DEV_PACKAGE_INSTALLED -eq 0 ]; then
+                # Try specific version first, then fall back to generic
+                if apt-cache search --names-only "python${PYTHON_VERSION}.${PYTHON_MINOR}-dev" | grep -q .; then
+                    PACKAGES_TO_INSTALL+=("python${PYTHON_VERSION}.${PYTHON_MINOR}-dev")
+                elif apt-cache search --names-only "python${PYTHON_VERSION}-dev" | grep -q .; then
+                    PACKAGES_TO_INSTALL+=("python${PYTHON_VERSION}-dev")
+                else
+                    PACKAGES_TO_INSTALL+=("python3-dev")
+                fi
+                
+                # On Ubuntu 24.04+, we might also need distutils
+                if [[ "$VERSION_ID" == "24.04" || $(echo $VERSION_ID | cut -d. -f1) -ge 24 ]]; then
+                    if apt-cache search --names-only "python${PYTHON_VERSION}-distutils" | grep -q .; then
+                        PACKAGES_TO_INSTALL+=("python${PYTHON_VERSION}-distutils")
+                    elif apt-cache search --names-only "python3-distutils" | grep -q .; then
+                        PACKAGES_TO_INSTALL+=("python3-distutils")
+                    fi
+                fi
+            fi
+            
+            # Install all required packages
+            echo "Installing packages: ${PACKAGES_TO_INSTALL[*]}"
+            if sudo apt update && sudo apt install -y "${PACKAGES_TO_INSTALL[@]}"; then
+                echo "Successfully installed required packages."
                 VENV_PACKAGE_INSTALLED=1
+                DEV_PACKAGE_INSTALLED=1
             else
-                echo "Failed to install virtual environment packages. Please install manually and run this script again."
+                echo "Failed to install some packages. You may need to install them manually:"
+                echo "sudo apt install ${PACKAGES_TO_INSTALL[*]}"
                 exit 1
             fi
         else
-            echo "Please install the required packages manually and run this script again."
+            echo "Please install the required packages manually and run this script again:"
+            echo "sudo apt update && sudo apt install python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev"
             exit 1
         fi
     fi
