@@ -97,26 +97,33 @@ if [ $IS_DEBIAN_UBUNTU -eq 1 ]; then
                     PACKAGES_TO_INSTALL+=("python3-dev")
                 fi
                 
-                # On Ubuntu 24.04+, we might also need distutils
+                # On Ubuntu 24.04+, check for distutils package but don't fail if not found
+                # It might be included in another package or not needed separately
                 if [[ "$VERSION_ID" == "24.04" || $(echo $VERSION_ID | cut -d. -f1) -ge 24 ]]; then
-                    if apt-cache search --names-only "python${PYTHON_VERSION}-distutils" | grep -q .; then
+                    # Try version-specific distutils first
+                    if apt-cache search --names-only "python${PYTHON_VERSION}.${PYTHON_MINOR}-distutils" | grep -q .; then
+                        PACKAGES_TO_INSTALL+=("python${PYTHON_VERSION}.${PYTHON_MINOR}-distutils")
+                    elif apt-cache search --names-only "python${PYTHON_VERSION}-distutils" | grep -q .; then
                         PACKAGES_TO_INSTALL+=("python${PYTHON_VERSION}-distutils")
-                    elif apt-cache search --names-only "python3-distutils" | grep -q .; then
-                        PACKAGES_TO_INSTALL+=("python3-distutils")
                     fi
+                    # Don't add generic python3-distutils as it might not exist
                 fi
             fi
             
             # Install all required packages
-            echo "Installing packages: ${PACKAGES_TO_INSTALL[*]}"
-            if sudo apt update && sudo apt install -y "${PACKAGES_TO_INSTALL[@]}"; then
-                echo "Successfully installed required packages."
-                VENV_PACKAGE_INSTALLED=1
-                DEV_PACKAGE_INSTALLED=1
+            if [ ${#PACKAGES_TO_INSTALL[@]} -gt 0 ]; then
+                echo "Installing packages: ${PACKAGES_TO_INSTALL[*]}"
+                if sudo apt update && sudo apt install -y "${PACKAGES_TO_INSTALL[@]}"; then
+                    echo "Successfully installed required packages."
+                    VENV_PACKAGE_INSTALLED=1
+                    DEV_PACKAGE_INSTALLED=1
+                else
+                    echo "Some packages failed to install. We'll try to continue anyway."
+                    echo "If you encounter problems, you may need to install these packages manually:"
+                    echo "sudo apt install ${PACKAGES_TO_INSTALL[*]}"
+                fi
             else
-                echo "Failed to install some packages. You may need to install them manually:"
-                echo "sudo apt install ${PACKAGES_TO_INSTALL[*]}"
-                exit 1
+                echo "No packages to install."
             fi
         else
             echo "Please install the required packages manually and run this script again:"
@@ -145,27 +152,47 @@ fi
 # Create a virtual environment if it doesn't exist
 if [ ! -d "venv" ]; then
     echo "Creating virtual environment..."
-    # Use the --prompt option to ensure it creates a more complete environment
-    python3 -m venv venv --prompt "jaidee-env"
-    if [ $? -ne 0 ]; then
+    # Try to create venv with different options based on what's available
+    if python3 -m venv venv --prompt "jaidee-env" 2>/dev/null; then
+        echo "Virtual environment created successfully."
+    elif python3 -m venv venv 2>/dev/null; then
+        echo "Virtual environment created without prompt."
+    else
         echo "Failed to create virtual environment."
         
-        # Additional helpful information for troubleshooting
-        echo "Checking Python venv capabilities..."
-        python3 -m venv --help
+        # Show helpful information for troubleshooting
+        echo "Checking if Python venv module is available:"
+        python3 -c "import venv; print('venv module is available')" 2>/dev/null || echo "venv module is not available"
+        
+        echo "Checking if ensurepip module is available:"
+        python3 -c "import ensurepip; print('ensurepip module is available')" 2>/dev/null || echo "ensurepip module is not available"
         
         if [ $IS_DEBIAN_UBUNTU -eq 1 ]; then
-            echo "On Ubuntu/Debian, try installing these packages:"
-            echo "sudo apt install python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev"
+            echo "For Ubuntu 24.04 or later, you might need to install virtualenv as an alternative:"
+            echo "pip3 install virtualenv"
+            echo "Then run: virtualenv venv"
             
-            # Additional suggestions for Ubuntu 24.04+
-            if [[ "$VERSION_ID" == "24.04" || $(echo $VERSION_ID | cut -d. -f1) -ge 24 ]]; then
-                echo "For Ubuntu 24.04 or later, you might also need:"
-                echo "sudo apt install python${PYTHON_VERSION}-distutils"
+            # Try installing virtualenv and creating the environment
+            read -p "Would you like to try installing virtualenv now? (y/n): " INSTALL_VIRTUALENV
+            if [[ "$INSTALL_VIRTUALENV" =~ ^[Yy]$ ]]; then
+                # Install pip if not already installed
+                if ! command -v pip3 &>/dev/null; then
+                    echo "Installing pip3 first..."
+                    sudo apt update && sudo apt install -y python3-pip
+                fi
+                
+                echo "Installing virtualenv..."
+                pip3 install virtualenv
+                
+                echo "Creating virtual environment with virtualenv..."
+                virtualenv venv
             fi
         fi
         
-        exit 1
+        # If we still don't have a valid venv, exit
+        if [ ! -d "venv" ]; then
+            exit 1
+        fi
     fi
 fi
 
