@@ -176,7 +176,7 @@ apt-get install -y nginx certbot python3-certbot-nginx
 cat > /etc/nginx/sites-available/chatbot << 'EOF'
 server {
     listen 80;
-    server_name your-domain.com;  # Replace with your actual domain
+    server_name _;  # Default server for any hostname or IP
 
     location / {
         proxy_pass http://localhost:5000;
@@ -229,14 +229,17 @@ print_section "Installation Complete"
 echo "Chatbot installation completed!"
 echo "Next steps:"
 echo "1. Edit your .env file: nano $ENV_FILE"
-echo "2. Update Nginx configuration with your domain: nano /etc/nginx/sites-available/chatbot"
-echo "3. Run 'certbot --nginx -d your-domain.com' to set up SSL"
-echo "4. Start the application using Docker: cd $APP_DIR && docker-compose up -d"
+echo "2. Start the application using Docker: cd $APP_DIR && docker-compose up -d"
 echo
-echo "For SSL to work correctly, make sure your domain's DNS points to this server!"
+echo "Your webhook URL for LINE configuration will be: http://YOUR_PUBLIC_IP"
+echo
+echo "NOTE: For secure HTTPS connections with just an IP address:"
+echo "- You can use a self-signed certificate: 'sudo certbot --nginx' and follow prompts"
+echo "- But LINE webhook requires valid SSL certificates, so consider using a service like ngrok"
+echo "  for development or obtaining a proper domain for production use."
 
 # Apply ownership again to be extra sure
 chown -R $CURRENT_USER:$CURRENT_USER $APP_DIR
-chmod +x "$APP_DIR/azure_install.sh"
+chmod +x "$APP_DIR/app_deepseek.py" 2>/dev/null || echo "No app_deepseek.py file found yet."
 
 echo "Done!"
