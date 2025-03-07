@@ -1,391 +1,242 @@
 #!/bin/bash
-set -e
 
-echo "========================================"
-echo "ใจดี Chatbot - Installation Script"
-echo "========================================"
-echo ""
+# ใจดี Chatbot - Azure Ubuntu 24.04 LTS Installation Script
+# This script installs and configures all necessary components for the chatbot application
+# on an Azure Ubuntu Server 24.04 LTS (Gen2 x64)
 
-# Enable debug mode if needed
-DEBUG=0
-if [[ "$1" == "--debug" ]]; then
-    DEBUG=1
-    set -x  # Enable command tracing
-    echo "Debug mode enabled"
-fi
+set -e  # Exit immediately if a command exits with a non-zero status
 
-# Check if Python is installed
-if ! command -v python3 &> /dev/null; then
-    echo "Python is not installed or not in PATH."
-    echo "Please install Python 3.9 or higher from https://www.python.org/downloads/"
-    exit 1
-fi
-
-# Check Python version
-PYTHON_VERSION=$(python3 -c "import sys; print(sys.version_info.major)")
-PYTHON_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
-if [ "$PYTHON_VERSION" -lt 3 ]; then
-    echo "Python version 3 or higher is required. Found version $PYTHON_VERSION."
-    exit 1
-fi
-
-echo "Using Python version $PYTHON_VERSION.$PYTHON_MINOR"
-
-# Check if we're on a Debian/Ubuntu system
-IS_DEBIAN_UBUNTU=0
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    if [[ "$ID" == "debian" || "$ID" == "ubuntu" || "$ID_LIKE" == *"debian"* ]]; then
-        IS_DEBIAN_UBUNTU=1
-        echo "Detected Debian/Ubuntu-based system: $PRETTY_NAME"
-    fi
-fi
-
-# Check for required packages on Debian/Ubuntu
-if [ $IS_DEBIAN_UBUNTU -eq 1 ]; then
-    # Check for python3-venv
-    VENV_PACKAGE_INSTALLED=0
-    if dpkg -l | grep -q "python${PYTHON_VERSION}\.${PYTHON_MINOR}-venv\|python${PYTHON_VERSION}-venv\|python3-venv"; then
-        VENV_PACKAGE_INSTALLED=1
-        echo "Python virtual environment packages are already installed."
-    else
-        echo "The python3-venv package is required but not installed."
-    fi
-    
-    # Check for python3-dev (needed for compiling extensions)
-    DEV_PACKAGE_INSTALLED=0
-    if dpkg -l | grep -q "python${PYTHON_VERSION}\.${PYTHON_MINOR}-dev\|python${PYTHON_VERSION}-dev\|python3-dev"; then
-        DEV_PACKAGE_INSTALLED=1
-        echo "Python development packages are already installed."
-    else
-        echo "Python development packages are required but not installed."
-    fi
-    
-    # If either package is missing, offer to install
-    if [ $VENV_PACKAGE_INSTALLED -eq 0 ] || [ $DEV_PACKAGE_INSTALLED -eq 0 ]; then
-        echo ""
-        echo "Missing required packages:"
-        [ $VENV_PACKAGE_INSTALLED -eq 0 ] && echo "- python3-venv (for virtual environments)"
-        [ $DEV_PACKAGE_INSTALLED -eq 0 ] && echo "- python3-dev (for compiling extensions)"
-        echo ""
-        
-        read -p "Would you like to install these packages automatically? (y/n): " INSTALL_PACKAGES
-        if [[ "$INSTALL_PACKAGES" =~ ^[Yy]$ ]]; then
-            echo "Installing required Python packages..."
-            
-            # Build an array of packages to install
-            PACKAGES_TO_INSTALL=()
-            
-            if [ $VENV_PACKAGE_INSTALLED -eq 0 ]; then
-                # Try specific version first, then fall back to generic
-                if apt-cache search --names-only "python${PYTHON_VERSION}.${PYTHON_MINOR}-venv" | grep -q .; then
-                    PACKAGES_TO_INSTALL+=("python${PYTHON_VERSION}.${PYTHON_MINOR}-venv")
-                elif apt-cache search --names-only "python${PYTHON_VERSION}-venv" | grep -q .; then
-                    PACKAGES_TO_INSTALL+=("python${PYTHON_VERSION}-venv")
-                else
-                    PACKAGES_TO_INSTALL+=("python3-venv")
-                fi
-            fi
-            
-            if [ $DEV_PACKAGE_INSTALLED -eq 0 ]; then
-                # Try specific version first, then fall back to generic
-                if apt-cache search --names-only "python${PYTHON_VERSION}.${PYTHON_MINOR}-dev" | grep -q .; then
-                    PACKAGES_TO_INSTALL+=("python${PYTHON_VERSION}.${PYTHON_MINOR}-dev")
-                elif apt-cache search --names-only "python${PYTHON_VERSION}-dev" | grep -q .; then
-                    PACKAGES_TO_INSTALL+=("python${PYTHON_VERSION}-dev")
-                else
-                    PACKAGES_TO_INSTALL+=("python3-dev")
-                fi
-                
-                # On Ubuntu 24.04+, check for distutils package but don't fail if not found
-                # It might be included in another package or not needed separately
-                if [[ "$VERSION_ID" == "24.04" || $(echo $VERSION_ID | cut -d. -f1) -ge 24 ]]; then
-                    # Try version-specific distutils first
-                    if apt-cache search --names-only "python${PYTHON_VERSION}.${PYTHON_MINOR}-distutils" | grep -q .; then
-                        PACKAGES_TO_INSTALL+=("python${PYTHON_VERSION}.${PYTHON_MINOR}-distutils")
-                    elif apt-cache search --names-only "python${PYTHON_VERSION}-distutils" | grep -q .; then
-                        PACKAGES_TO_INSTALL+=("python${PYTHON_VERSION}-distutils")
-                    fi
-                    # Don't add generic python3-distutils as it might not exist
-                fi
-            fi
-            
-            # Install all required packages
-            if [ ${#PACKAGES_TO_INSTALL[@]} -gt 0 ]; then
-                echo "Installing packages: ${PACKAGES_TO_INSTALL[*]}"
-                if sudo apt update && sudo apt install -y "${PACKAGES_TO_INSTALL[@]}"; then
-                    echo "Successfully installed required packages."
-                    VENV_PACKAGE_INSTALLED=1
-                    DEV_PACKAGE_INSTALLED=1
-                else
-                    echo "Some packages failed to install. We'll try to continue anyway."
-                    echo "If you encounter problems, you may need to install these packages manually:"
-                    echo "sudo apt install ${PACKAGES_TO_INSTALL[*]}"
-                fi
-            else
-                echo "No packages to install."
-            fi
-        else
-            echo "Please install the required packages manually and run this script again:"
-            echo "sudo apt update && sudo apt install python${PYTHON_VERSION}-venv python${PYTHON_VERSION}-dev"
-            exit 1
-        fi
-    fi
-fi
-
-# Check if Docker is installed (optional)
-DOCKER_AVAILABLE=0
-if command -v docker &> /dev/null; then
-    DOCKER_AVAILABLE=1
-    echo "Docker is available. You can use Docker for deployment."
-else
-    echo "Docker is not available. You can install it from https://www.docker.com/products/docker-desktop"
-    echo "Continuing with local installation..."
-fi
-
-# Remove existing venv if it's incomplete
-if [ -d "venv" ] && [ ! -f "venv/bin/activate" ]; then
-    echo "Found incomplete virtual environment. Removing it to recreate..."
-    rm -rf venv
-fi
-
-# Create a virtual environment if it doesn't exist
-if [ ! -d "venv" ]; then
-    echo "Creating virtual environment..."
-    # Try to create venv with different options based on what's available
-    if python3 -m venv venv --prompt "jaidee-env" 2>/dev/null; then
-        echo "Virtual environment created successfully."
-    elif python3 -m venv venv 2>/dev/null; then
-        echo "Virtual environment created without prompt."
-    else
-        echo "Failed to create virtual environment."
-        
-        # Show helpful information for troubleshooting
-        echo "Checking if Python venv module is available:"
-        python3 -c "import venv; print('venv module is available')" 2>/dev/null || echo "venv module is not available"
-        
-        echo "Checking if ensurepip module is available:"
-        python3 -c "import ensurepip; print('ensurepip module is available')" 2>/dev/null || echo "ensurepip module is not available"
-        
-        if [ $IS_DEBIAN_UBUNTU -eq 1 ]; then
-            echo "For Ubuntu 24.04 or later, you might need to install virtualenv as an alternative:"
-            echo "pip3 install virtualenv"
-            echo "Then run: virtualenv venv"
-            
-            # Try installing virtualenv and creating the environment
-            read -p "Would you like to try installing virtualenv now? (y/n): " INSTALL_VIRTUALENV
-            if [[ "$INSTALL_VIRTUALENV" =~ ^[Yy]$ ]]; then
-                # Install pip if not already installed
-                if ! command -v pip3 &>/dev/null; then
-                    echo "Installing pip3 first..."
-                    sudo apt update && sudo apt install -y python3-pip
-                fi
-                
-                echo "Installing virtualenv..."
-                pip3 install virtualenv
-                
-                echo "Creating virtual environment with virtualenv..."
-                virtualenv venv
-            fi
-        fi
-        
-        # If we still don't have a valid venv, exit
-        if [ ! -d "venv" ]; then
-            exit 1
-        fi
-    fi
-fi
-
-# Double-check that the activate script exists
-if [ ! -f "venv/bin/activate" ]; then
-    echo "Virtual environment was created, but activation script wasn't found."
-    echo "This might indicate an issue with your Python installation or permissions."
-    
-    # Try to fix it by installing the ensurepip module
-    echo "Attempting to fix the environment by installing ensurepip..."
-    python3 -m ensurepip
-    
-    # Try recreating the environment with additional options
-    echo "Recreating the virtual environment with additional options..."
-    rm -rf venv
-    python3 -m venv venv --system-site-packages --prompt "jaidee-env"
-    
-    # Check again
-    if [ ! -f "venv/bin/activate" ]; then
-        echo "Still couldn't create a complete virtual environment."
-        echo "Environment contents:"
-        ls -la venv/
-        if [ -d "venv/bin" ]; then
-            echo "Contents of venv/bin:"
-            ls -la venv/bin/
-        else
-            echo "venv/bin directory doesn't exist!"
-        fi
-        
-        # Last resort: create the activate script manually
-        echo "Creating minimal activate script manually..."
-        mkdir -p venv/bin
-        cat > venv/bin/activate << 'EOF'
-# This file must be used with "source bin/activate" *from bash*
-# you cannot run it directly
-
-deactivate () {
-    unset -f pydoc >/dev/null 2>&1 || true
-    
-    # reset old environment variables
-    # ! [ -z ${VAR+_} ] returns true if VAR is declared at all
-    if ! [ -z "${_OLD_VIRTUAL_PATH:+_}" ] ; then
-        PATH="$_OLD_VIRTUAL_PATH"
-        export PATH
-        unset _OLD_VIRTUAL_PATH
-    fi
-    
-    if ! [ -z "${_OLD_VIRTUAL_PYTHONHOME+_}" ] ; then
-        PYTHONHOME="$_OLD_VIRTUAL_PYTHONHOME"
-        export PYTHONHOME
-        unset _OLD_VIRTUAL_PYTHONHOME
-    fi
-    
-    # The hash command must be called to get it to forget past
-    # commands. Without forgetting past commands the $PATH changes
-    # we made may not be respected
-    hash -r 2>/dev/null
-    
-    if ! [ -z "${_OLD_VIRTUAL_PS1+_}" ] ; then
-        PS1="$_OLD_VIRTUAL_PS1"
-        export PS1
-        unset _OLD_VIRTUAL_PS1
-    fi
-    
-    unset VIRTUAL_ENV
-    unset -f deactivate
+# Print section headers for better readability
+print_section() {
+    echo
+    echo "===== $1 ====="
+    echo
 }
 
-# unset irrelevant variables
-deactivate nondestructive
-
-VIRTUAL_ENV="$(cd "$(dirname "$(dirname "${BASH_SOURCE[0]}")")" && pwd)"
-export VIRTUAL_ENV
-
-_OLD_VIRTUAL_PATH="$PATH"
-PATH="$VIRTUAL_ENV/bin:$PATH"
-export PATH
-
-# unset PYTHONHOME if set
-if ! [ -z "${PYTHONHOME+_}" ] ; then
-    _OLD_VIRTUAL_PYTHONHOME="$PYTHONHOME"
-    unset PYTHONHOME
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+    echo "Please run this script as root (use sudo)"
+    exit 1
 fi
 
-if [ -z "${VIRTUAL_ENV_DISABLE_PROMPT-}" ] ; then
-    _OLD_VIRTUAL_PS1="${PS1-}"
-    PS1="(jaidee-env) ${PS1-}"
-    export PS1
+# Get current username for ownership settings
+CURRENT_USER=$(logname || echo $SUDO_USER)
+if [ -z "$CURRENT_USER" ]; then
+    echo "Unable to determine current user. Please run with sudo."
+    exit 1
 fi
 
-# Make sure to unalias pydoc if it's already there
-alias pydoc 2>/dev/null >/dev/null && unalias pydoc || true
+# Set working directory
+APP_DIR="/opt/chatbot"
+ENV_FILE="$APP_DIR/.env"
 
-pydoc () {
-    python -m pydoc "$@"
+print_section "System Update & Basic Packages"
+# Update and upgrade system
+apt-get update && apt-get upgrade -y
+
+# Install basic utilities
+apt-get install -y \
+    apt-transport-https \
+    ca-certificates \
+    curl \
+    gnupg \
+    lsb-release \
+    git \
+    nano \
+    unzip \
+    supervisor
+
+print_section "Installing Docker"
+# Remove older versions if they exist
+apt-get remove -y docker docker-engine docker.io containerd runc || true
+
+# Install Docker repository
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Install Docker Engine
+apt-get update
+apt-get install -y docker-ce docker-ce-cli containerd.io
+
+# Install Docker Compose
+DOCKER_COMPOSE_VERSION=v2.24.0
+curl -L "https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+chmod +x /usr/local/bin/docker-compose
+
+# Add current user to docker group
+usermod -aG docker $CURRENT_USER
+echo "Docker installed successfully. Added $CURRENT_USER to docker group."
+
+print_section "Setting Up Application Directory"
+# Create application directory
+mkdir -p $APP_DIR
+cd $APP_DIR
+
+# Clone or create application files
+git clone https://github.com/yourusername/chatbot.git $APP_DIR || {
+    echo "Failed to clone repository. Creating directory structure manually."
+    mkdir -p $APP_DIR/{logs,data}
 }
 
-# The hash command must be called to get it to forget past
-# commands. Without forgetting past commands the $PATH changes
-# we made may not be respected
-hash -r 2>/dev/null
-EOF
-        chmod +x venv/bin/activate
-        
-        # Check one final time
-        if [ ! -f "venv/bin/activate" ]; then
-            echo "Manual creation also failed. Please install virtualenv and try again:"
-            echo "pip3 install virtualenv"
-            echo "Then run: virtualenv venv"
-            exit 1
-        fi
-    fi
-fi
-
-# Activate the virtual environment and install dependencies
-echo "Activating virtual environment and installing dependencies..."
-source venv/bin/activate
-if [ $? -ne 0 ]; then
-    echo "Failed to activate virtual environment."
-    exit 1
-fi
-
-# Verify activation
-if [[ -z "$VIRTUAL_ENV" ]]; then
-    echo "Virtual environment activation didn't work as expected."
-    exit 1
-fi
-
-echo "Installing required packages..."
-pip install -r requirements.txt
-
-# Check for .env file and create it if it doesn't exist
-if [ ! -f ".env" ]; then
-    echo "Creating .env file with default settings..."
-    cat > .env << EOF
+print_section "Setting Up Environment Variables"
+# Create .env file from example if it doesn't exist
+if [ ! -f "$ENV_FILE" ]; then
+    if [ -f "$APP_DIR/.env.example" ]; then
+        cp "$APP_DIR/.env.example" "$ENV_FILE"
+        echo "Created .env file from example. Please update with your actual values."
+    else
+        cat > "$ENV_FILE" << EOF
 # LINE API Credentials
-LINE_CHANNEL_ACCESS_TOKEN=your_line_channel_access_token
-LINE_CHANNEL_SECRET=your_line_channel_secret
+LINE_CHANNEL_ACCESS_TOKEN=your_token_here
+LINE_CHANNEL_SECRET=your_secret_here
 
 # Deepseek AI Configuration
-DEEPSEEK_API_KEY=your_deepseek_api_key
+DEEPSEEK_API_KEY=your_api_key_here
 
 # Redis Configuration
-REDIS_HOST=localhost
+REDIS_HOST=redis
 REDIS_PORT=6379
 REDIS_DB=0
 
 # MySQL Configuration
-MYSQL_HOST=localhost
+MYSQL_HOST=db
 MYSQL_PORT=3306
-MYSQL_USER=root
-MYSQL_PASSWORD=password
+MYSQL_USER=chatbot
+MYSQL_PASSWORD=$(openssl rand -hex 12)
 MYSQL_DB=chatbot
+MYSQL_ROOT_PASSWORD=$(openssl rand -hex 16)
 
-# For Docker Compose
-MYSQL_ROOT_PASSWORD=password
+# Application Settings
+ENVIRONMENT=production
+LOG_LEVEL=INFO
 EOF
-    echo "Please edit the .env file with your actual credentials."
+        echo "Created default .env file with auto-generated passwords. Please update with your actual values."
+    fi
+    
+    # Set appropriate permissions
+    chmod 600 "$ENV_FILE"
+    chown $CURRENT_USER:$CURRENT_USER "$ENV_FILE"
+else
+    echo ".env file already exists. Skipping creation."
 fi
 
-echo ""
-echo "Installation completed successfully!"
-echo ""
-echo "Available options:"
-echo "1. Run locally with Python"
-echo "2. Run with Docker Compose (requires Docker)"
-echo "3. Exit"
-echo ""
+print_section "Setting Up Docker Services"
+# Create or update docker-compose.yml
+cat > "$APP_DIR/docker-compose.yml" << 'EOF'
+version: '3'
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    restart: always
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MYSQL_HOST=db
+      - MYSQL_PORT=3306
+      - TZ=Asia/Bangkok
+    depends_on:
+      - redis
+      - db
 
-read -p "Choose an option [1-3]: " OPTION
+  redis:
+    image: redis:6-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
 
-case $OPTION in
-    1)
-        echo "Starting the chatbot locally..."
-        python3 app_deepseek.py
-        ;;
-    2)
-        if [ $DOCKER_AVAILABLE -eq 1 ]; then
-            echo "Starting with Docker Compose..."
-            docker-compose up -d
-        else
-            echo "Docker is not available. Cannot start with Docker Compose."
-        fi
-        ;;
-    *)
-        echo "Exiting installation."
-        ;;
-esac
+  db:
+    image: mysql:8.0
+    command: --default-authentication-plugin=mysql_native_password
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DB}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
 
-echo ""
-echo "Thank you for installing ใจดี Chatbot!"
-echo "For more information, visit https://github.com/yourusername/chatbot"
-echo ""
+volumes:
+  redis_data:
+  db_data:
+EOF
 
-# Deactivate the virtual environment
-deactivate
+print_section "Setting Up Nginx Reverse Proxy"
+# Install Nginx
+apt-get install -y nginx certbot python3-certbot-nginx
+
+# Configure Nginx for the chatbot
+cat > /etc/nginx/sites-available/chatbot << 'EOF'
+server {
+    listen 80;
+    server_name your-domain.com;  # Replace with your actual domain
+
+    location / {
+        proxy_pass http://localhost:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+
+# Enable the site
+ln -sf /etc/nginx/sites-available/chatbot /etc/nginx/sites-enabled/
+rm -f /etc/nginx/sites-enabled/default
+
+# Test Nginx configuration
+nginx -t && systemctl reload nginx
+
+print_section "Setting Up Supervisor"
+# Create supervisor configuration for manual Python deployment (alternative to Docker)
+cat > /etc/supervisor/conf.d/chatbot.conf << EOF
+[program:chatbot]
+command=/usr/bin/python3 $APP_DIR/app_deepseek.py
+directory=$APP_DIR
+autostart=false
+autorestart=true
+startretries=5
+stderr_logfile=$APP_DIR/logs/supervisor.err.log
+stdout_logfile=$APP_DIR/logs/supervisor.out.log
+user=$CURRENT_USER
+environment=
+    PATH="/usr/local/bin:/usr/bin:/bin",
+    PYTHONUNBUFFERED="1"
+EOF
+
+supervisorctl reread
+supervisorctl update
+
+# Set proper ownership of app directory
+chown -R $CURRENT_USER:$CURRENT_USER $APP_DIR
+
+print_section "Setting Up Security"
+# Basic firewall setup
+ufw allow ssh
+ufw allow http
+ufw allow https
+ufw --force enable
+
+print_section "Installation Complete"
+echo "Chatbot installation completed!"
+echo "Next steps:"
+echo "1. Edit your .env file: nano $ENV_FILE"
+echo "2. Update Nginx configuration with your domain: nano /etc/nginx/sites-available/chatbot"
+echo "3. Run 'certbot --nginx -d your-domain.com' to set up SSL"
+echo "4. Start the application using Docker: cd $APP_DIR && docker-compose up -d"
+echo
+echo "For SSL to work correctly, make sure your domain's DNS points to this server!"
+
+# Apply ownership again to be extra sure
+chown -R $CURRENT_USER:$CURRENT_USER $APP_DIR
+chmod +x "$APP_DIR/azure_install.sh"
+
+echo "Done!"
