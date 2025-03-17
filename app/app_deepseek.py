@@ -29,6 +29,7 @@ from .utils import safe_db_operation, safe_api_call
 from .chat_history_db import ChatHistoryDB
 from .token_counter import TokenCounter
 from .async_api import AsyncDeepseekClient
+from .database_init import initialize_database
 
 # สร้างอินสแตนซ์แอป Flask
 app = Flask(__name__)
@@ -88,6 +89,10 @@ try:
         port=config.MYSQL_PORT,
         connect_timeout=10
     )
+    
+    # เริ่มต้นฐานข้อมูล (สร้างตารางถ้ายังไม่มี)
+    initialize_database(mysql_pool)
+    logging.info("เสร็จสิ้นการตรวจสอบและเริ่มต้นฐานข้อมูล")
     
     # เริ่มต้นฐานข้อมูล
     db = ChatHistoryDB(mysql_pool)
@@ -583,6 +588,11 @@ def send_session_timeout_message(user_id):
 
 def prepare_conversation_context(messages, optimized_history):
     """เตรียมบริบทการสนทนาโดยใช้ประวัติ"""
+    # ตรวจสอบว่า optimized_history เป็น None หรือไม่
+    if optimized_history is None:
+        # ถ้าเป็น None ให้ใช้ list ว่าง
+        optimized_history = []
+        
     if len(optimized_history) > 5:
         summary = summarize_conversation_history(optimized_history[5:])
         if summary:
