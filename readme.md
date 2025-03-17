@@ -1,8 +1,8 @@
-# ใจดี Chatbot
+# DeepseekLineWebhook
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-ใจดี (Jai Dee) is a LINE-based chatbot designed to provide support and guidance for individuals dealing with substance abuse issues. The chatbot leverages the DeepSeek AI model to deliver empathetic, non-judgmental responses in Thai language.
+DeepseekLineWebhook is a LINE-based chatbot designed to provide support and guidance for individuals dealing with substance abuse issues. The chatbot leverages the DeepSeek AI model to deliver empathetic, non-judgmental responses in Thai language.
 
 ## 🌟 Features
 
@@ -27,8 +27,8 @@
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/jaidee-chatbot.git
-   cd jaidee-chatbot
+   git clone https://github.com/yourusername/DeepseekLineWebhook.git
+   cd DeepseekLineWebhook
    ```
 
 2. Create a `.env` file from the template:
@@ -116,34 +116,53 @@ The application follows a modular architecture with these key components:
 
 ### Key Components
 
-- **app_improved.py**: Main application handling LINE webhook events
+- **app_deepseek.py**: Main application handling LINE webhook events
 - **async_api.py**: Asynchronous client for DeepSeek AI interactions
 - **chat_history_db.py**: Database operations for conversation history
 - **token_counter.py**: Token counting for API usage monitoring
+- **middleware/rate_limiter.py**: Rate limiting implementation
 
 ## 🖥️ Development
 
 ### Project Structure
 
 ```
-ใจดี-chatbot/
+DeepseekLineWebhook/
 │
 ├── app/                          # Application code
+│   ├── __init__.py               # Package initialization
 │   ├── app_deepseek.py           # Main application
 │   ├── async_api.py              # Asynchronous API client
 │   ├── chat_history_db.py        # Database operations
 │   ├── config.py                 # Configuration
+│   ├── database_init.py          # Database initialization
 │   ├── token_counter.py          # Token counting
-│   └── utils.py                  # Utilities
+│   ├── utils.py                  # Utilities
+│   └── middleware/               # Middleware components
+│       ├── __init__.py           # Package initialization
+│       └── rate_limiter.py       # Rate limiting middleware
 │
-├── docker/                       # Docker configuration
-│   ├── Dockerfile                
-│   └── docker-compose.yml        
-│
+├── docker-compose.yml            # Docker compose configuration
+├── Dockerfile                    # Docker configuration
+├── logs/                         # Log directory
 ├── scripts/                      # Installation scripts
-├── tests/                        # Test suite
-└── .env.example                  # Environment template
+│   ├── install.bat               # Windows installation script
+│   └── install.sh                # Linux installation script
+├── wsgi.py                       # WSGI entry point
+├── requirements.txt              # Python dependencies
+├── .gitignore                    # Git ignore patterns
+└── readme.md                     # This documentation
 ```
+
+### Version Control
+
+The project includes a comprehensive `.gitignore` file that excludes:
+- Python bytecode and cache files
+- Virtual environment directories
+- Log files
+- Local configuration and environment files
+- IDE-specific files
+- Database files
 
 ### Running Tests
 
@@ -153,7 +172,7 @@ pytest tests/
 
 ### Logging
 
-Logs are stored in `app.log` with configurable verbosity through the `LOG_LEVEL` environment variable.
+Logs are stored in the `logs/` directory with configurable verbosity through the `LOG_LEVEL` environment variable.
 
 ## 📱 Usage
 
